@@ -1,0 +1,47 @@
+name: BTT
+description: Install btt and check that your tests match their tree specifications.
+author: Maddiaa0
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  version:
+    description: Exact btt release version, with or without the v prefix.
+    default: '0.2.0'
+  working-directory:
+    description: Directory in which to run btt and the test command.
+    default: '.'
+  paths:
+    description: Tree files or directories to check, one per line, relative to working-directory.
+    default: ''
+  install-only:
+    description: Install btt on PATH without running checks or tests.
+    default: 'false'
+  test-command:
+    description: Optional Bash command to run after btt check succeeds.
+    default: ''
+outputs:
+  version:
+    description: Installed btt version, without the v prefix.
+    value: ${{ steps.install.outputs.version }}
+  binary-path:
+    description: Absolute path to the installed executable.
+    value: ${{ steps.install.outputs.binary-path }}
+runs:
+  using: composite
+  steps:
+    - name: Install btt
+      id: install
+      shell: bash
+      env:
+        BTT_VERSION: ${{ inputs.version }}
+        BTT_INSTALL_ONLY: ${{ inputs.install-only }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/install.sh"
+    - name: Check trees and run tests
+      if: inputs.install-only != 'true'
+      shell: bash
+      env:
+        BTT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        BTT_PATHS: ${{ inputs.paths }}
+        BTT_TEST_COMMAND: ${{ inputs.test-command }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/check.sh"
