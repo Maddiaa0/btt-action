@@ -45,7 +45,8 @@ jobs:
         run: |
           mkdir -p smoke
           printf 'Example\n└── it works\n' > smoke/example.tree
-          btt scaffold smoke/example.tree
+          printf '[project]\npacks = ["rust"]\n' > smoke/btt.toml
+          btt scaffold --pack rust smoke/example.tree
       - uses: ./
         with:
           version: ${{ inputs.version }}
