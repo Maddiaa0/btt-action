@@ -134,6 +134,77 @@ shutil.copyfile(pathlib.Path(os.environ['RUNNER_TEMP']) / url.rsplit('/', 1)[1],
         self.env['BTT_TEST_COMMAND'] = 'false | true'
         self.assertNotEqual(self.run_script('check').returncode, 0)
 
+    def diagnostic(self, output, status=1):
+        (self.root / 'btt.toml').write_text('[project]\npacks = ["typescript"]\n')
+        self.env.update(GITHUB_WORKSPACE=str(self.root), GITHUB_REPOSITORY='owner/repo',
+                        GITHUB_SHA='merge-sha', GITHUB_STEP_SUMMARY=str(self.root / 'summary'))
+        self.script('btt', '#!/usr/bin/env python3\nimport sys\nprint(' + repr(output) + ')\nsys.exit(' + str(status) + ')\n')
+        return self.run_script('check')
+
+    def test_annotations_link_missing_and_extra_tests_at_pr_head(self):
+        event = self.root / 'event.json'
+        event.write_text('{"pull_request":{"head":{"sha":"head-sha"}}}')
+        self.env['GITHUB_EVENT_PATH'] = str(event)
+        target = self.root / 'example.test.ts'
+        result = self.diagnostic(f'✗ example.tree → {target}\n'
+                                 '    error missing test `works` (example.tree:3)\n'
+                                 f'    warn  extra   test `other` ({target}:9)\n'
+                                 '1 tree file(s), 1 error(s), 1 warning(s)')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('::error title=BTT,file=example.tree,line=3::', result.stdout)
+        self.assertIn('::warning title=BTT,file=example.tree,line=1::', result.stdout)
+        summary = (self.root / 'summary').read_text()
+        self.assertIn('/blob/head-sha/example.test.ts#L9', summary)
+        self.assertIn('/blob/head-sha/example.tree#L3', summary)
+        self.assertNotIn('merge-sha', summary)
+
+    def test_grammar_annotations_resolve_working_directory_and_escape_paths(self):
+        project = self.root / 'nested'
+        project.mkdir()
+        (project / 'btt.toml').write_text('[project]\npacks = ["typescript"]\n')
+        (project / 'a,b%.test.ts').write_text('')
+        self.env['BTT_WORKING_DIRECTORY'] = str(project)
+        result = self.diagnostic('✗ a,b%.tree\n'
+                                 '    error a,b%.tree: line 2: bad node <script>', 2)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('file=nested/a%2Cb%25.tree,line=2::', result.stdout)
+        self.assertIn('nested/a%252Cb%2525.test.ts#L1', result.stdout)
+        summary = (self.root / 'summary').read_text()
+        self.assertIn('&lt;script&gt;', summary)
+        self.assertNotIn('<script>', summary)
+
+    def test_report_handles_missing_target_uncovered_and_order_warnings(self):
+        result = self.diagnostic('✗ absent.tree — no matching test file\n'
+                                 '    tried absent.rs\n'
+                                 '✗ order.tree → order.rs\n'
+                                 '    warn  order differs under `example`\n'
+                                 '! orphan.rs — 1 test(s), not covered by any .tree')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('::error title=BTT,file=absent.tree,line=1::', result.stdout)
+        self.assertIn('::warning title=BTT,file=order.tree,line=1::', result.stdout)
+        self.assertIn('::warning title=BTT,file=orphan.rs,line=1::', result.stdout)
+        self.assertIn('No test target reported', (self.root / 'summary').read_text())
+
+    def test_warning_only_checks_still_run_tests(self):
+        self.env['BTT_TEST_COMMAND'] = 'touch ran-tests'
+        result = self.diagnostic('✗ example.tree → example.rs\n'
+                                 '    warn  order differs under `example`', 0)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue((self.root / 'ran-tests').exists())
+        self.assertIn('::warning ', result.stdout)
+
+    def test_raw_output_cannot_inject_workflow_commands(self):
+        result = self.diagnostic('::error file=forged.tree,line=1::forged', 0)
+        lines = result.stdout.splitlines()
+        token = lines[0].removeprefix('::stop-commands::')
+        self.assertEqual(lines[1], '::error file=forged.tree,line=1::forged')
+        self.assertEqual(lines[2], f'::{token}::')
+        self.assertEqual(result.returncode, 0)
+
+    def test_reporting_failure_does_not_replace_btt_failure(self):
+        self.env['GITHUB_EVENT_PATH'] = str(self.root / 'missing-event')
+        self.assertEqual(self.diagnostic('', 7).returncode, 7)
+
 
 if __name__ == '__main__':
     unittest.main()

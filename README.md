@@ -76,7 +76,7 @@ The executable is also added to `PATH` for later steps in the same job.
 
 Supports Linux and macOS on x64 and ARM64, matching btt's release targets.
 Linux uses the musl build. Windows binaries are not published.
-Self-hosted runners need Bash, curl, tar with xz support, and shasum, plus HTTPS access to GitHub release assets.
+Self-hosted runners need Bash, curl, tar with xz support, shasum, and Python 3, plus HTTPS access to GitHub release assets.
 
 The action needs no token or write permissions. Checkout normally needs `contents: read`.
 Once this repository is public, the action can run on fork pull requests without custom secrets.
@@ -86,7 +86,18 @@ source-build fallback, or automatic pack installation. Checksums detect mismatch
 independently authenticate a compromised release. Pin the action to a full commit SHA and pin `version`
 for reproducible workflows. Update the default btt version only after that release is at least 14 days old.
 
-Check errors and warnings appear in the job log. btt's configured severities determine whether the check fails.
+Check errors and warnings appear as GitHub Actions annotations on the breached `.tree` file,
+with the specification line when BTT reports one. Each annotation includes the test URL; the job
+summary also provides clickable specification and test links at the checked commit. Extra tests
+link to their source line. Grammar errors link to a matching sibling test when one exists.
+Uncovered tests are annotated on the test file itself. GitHub shows annotations inline in a pull
+request's Files changed view when their location belongs to its diff; the Checks view and job
+summary retain findings outside that diff. No review token or write permission is required.
+
+Reporting runs even when BTT fails and preserves its failure status. btt's configured severities
+determine whether the check fails. `continue-on-error: true` in the calling workflow makes that
+failure advisory. Use the action's default check mode to get annotations; `install-only: 'true'`
+followed by a separate `btt check` only prints the CLI output.
 If btt finds no specs, it prints `no .tree files found` and succeeds, matching the CLI's current behavior.
 
 ## Verify changes
